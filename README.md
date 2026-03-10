@@ -189,9 +189,6 @@ $ python scicli.py
 > /depth deep
   [switch to thorough search: 8-12 papers, think phase enabled]
 
-> What is the structural basis for nucleosome-nucleosome stacking?
-  [deep literature search with think phase, citation graph traversal]
-
 > /provider deepseek
 > /model deepseek-chat
   [switch provider mid-session]
