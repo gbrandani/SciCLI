@@ -1,0 +1,15 @@
+{
+  "_description": "Dracula — warm purples and magentas, high contrast. dracula code theme.",
+  "command": "bright_yellow",
+  "success": "bright_green",
+  "error": "bright_red",
+  "warning": "yellow",
+  "info": "dim",
+  "accent": "bright_magenta",
+  "heading": "bold bright_yellow",
+  "tool_call": "dim magenta",
+  "diff_add": "bright_green",
+  "diff_del": "bright_red",
+  "diff_hdr": "bright_magenta",
+  "code_theme": "dracula"
+}

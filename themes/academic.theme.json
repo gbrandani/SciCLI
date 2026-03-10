@@ -1,0 +1,15 @@
+{
+  "_description": "Academic — cool blues and greens, classic monokai code. Calm and readable.",
+  "command": "cyan",
+  "success": "green",
+  "error": "red",
+  "warning": "yellow",
+  "info": "dim",
+  "accent": "magenta",
+  "heading": "bold",
+  "tool_call": "dim cyan",
+  "diff_add": "green",
+  "diff_del": "red",
+  "diff_hdr": "cyan",
+  "code_theme": "monokai"
+}

@@ -1,0 +1,25 @@
+# Runtime data (never commit)
+conversations/
+uploads/
+literature/
+benchmark/
+test_outputs/
+prompts_dump.json
+
+# API keys / settings (never commit)
+settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Editor
+*.swp
+*~
+
+# other hidden stuff
+.*

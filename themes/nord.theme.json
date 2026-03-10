@@ -1,0 +1,15 @@
+{
+  "_description": "Nord — cool blue palette inspired by the Nord color scheme. github-dark code.",
+  "command": "bright_cyan",
+  "success": "bright_green",
+  "error": "bright_red",
+  "warning": "yellow",
+  "info": "dim",
+  "accent": "bright_magenta",
+  "heading": "bold bright_blue",
+  "tool_call": "dim blue",
+  "diff_add": "bright_green",
+  "diff_del": "bright_red",
+  "diff_hdr": "bright_cyan",
+  "code_theme": "github-dark"
+}
