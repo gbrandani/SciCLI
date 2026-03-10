@@ -74,7 +74,7 @@ API keys can be set as environment variables or in `settings.json` (see [Configu
 ### Clone and run
 
 ```bash
-git clone <https://github.com/gbrandani/SciCLI> scicli
+git clone https://github.com/gbrandani/SciCLI scicli
 cd scicli
 python scicli.py
 ```
