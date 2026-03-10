@@ -96,6 +96,91 @@ _build_source_inventory = _build_record_inventory
 
 
 # ----------------------------
+# OpenAI Responses API (native web_search — no agentic tool loop)
+# ----------------------------
+
+class OpenAIResponsesProvider(ProviderBase):
+    """
+    OpenAI Responses API with native web_search tool.
+
+    Key differences from OpenAIChatProvider:
+    - Uses client.responses.create() instead of chat.completions.create()
+    - Web search is native/opaque — no Brave, no custom tool loop
+    - Citations and consulted sources extracted from response annotations
+    - No agentic pipeline, no SOURCE INVENTORY, no Brave/S2 usage
+    - Compaction and context management still work (use_tools=False path)
+    """
+    name = "openai_responses"
+
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key)
+
+    def send(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        state: SessionState,
+        max_output_tokens: Optional[int] = None,
+        use_tools: bool = True,
+        **_callbacks,  # on_tool_start, on_tool_result, etc. — no-ops here
+    ) -> ReplyBundle:
+        kwargs: Dict[str, Any] = {"model": model, "input": messages}
+
+        eff = (state.reasoning_effort or "").strip().lower()
+        if eff and eff not in ("auto", ""):
+            kwargs["reasoning"] = {"effort": eff}
+
+        if max_output_tokens is not None:
+            kwargs["max_output_tokens"] = int(max_output_tokens)
+
+        # use_tools=True → enable native web_search (controlled by search_mode in scicli.py)
+        if use_tools:
+            kwargs["tools"] = [{"type": "web_search"}]
+            kwargs["tool_choice"] = "auto"
+            kwargs["include"] = ["web_search_call.action.sources"]
+
+        resp = self.client.responses.create(**kwargs)
+        answer_text = getattr(resp, "output_text", "") or ""
+
+        cited: List[Tuple[str, str]] = []
+        consulted: List[Tuple[str, str]] = []
+
+        try:
+            resp_d = resp.model_dump()
+        except Exception:
+            resp_d = {}
+
+        for item in (resp_d.get("output") or []):
+            itype = item.get("type")
+            if itype == "message":
+                for part in (item.get("content") or []):
+                    if part.get("type") == "output_text":
+                        for ann in (part.get("annotations") or []):
+                            if ann.get("type") == "url_citation":
+                                cited.append((ann.get("title") or "", ann.get("url") or ""))
+            elif itype == "web_search_call":
+                action = item.get("action") or {}
+                for src in (action.get("sources") or []):
+                    consulted.append((src.get("title") or "", src.get("url") or ""))
+
+        seen: set = set()
+        deduped_cited: List[Tuple[str, str]] = []
+        deduped_consulted: List[Tuple[str, str]] = []
+        for pairs, out in ((cited, deduped_cited), (consulted, deduped_consulted)):
+            for title, url in pairs:
+                key = url or title
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append((title, url))
+
+        return ReplyBundle(
+            text=answer_text,
+            cited=deduped_cited,
+            consulted=deduped_consulted,
+        )
+
+
+# ----------------------------
 # Sakura Internet AI Engine (OpenAI-compatible Chat Completions)
 # ----------------------------
 

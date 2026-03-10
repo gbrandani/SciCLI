@@ -91,6 +91,7 @@ from utils import (
 from providers import (
     ProviderBase, OpenAIProvider, OpenAIChatProvider,
     DeepSeekProvider, KimiProvider, SakuraProvider, SakuraUsageTracker,
+    OpenAIResponsesProvider,
     SAKURA_MONTHLY_LIMIT, SAKURA_USAGE_FILE,
 )
 from tools import _tool_search_papers, _tool_get_paper_references, execute_tool
@@ -832,6 +833,8 @@ class LLMChatClient:
                 )
             elif prov == "sakura":
                 self._providers[prov] = SakuraProvider(api_key=key)
+            elif prov == "openai_responses":
+                self._providers[prov] = OpenAIResponsesProvider(api_key=key)
             else:
                 raise ValueError(f"Unknown provider: {prov}")
 
@@ -941,9 +944,12 @@ class LLMChatClient:
         return 32_000, 4_000
 
     def _model_supports_tools(self, model: str) -> bool:
-        """Check if current model supports agentic tool calling."""
+        """Check if current model supports tool calling (agentic or native web_search)."""
         if not self.state.tools_enabled:
             return False
+        if self.state.provider == "openai_responses":
+            # "tools" here means native web_search — enabled unless search is off
+            return self.state.search_mode != "off"
         specs = get_model_specs()
         spec = specs.get(model, None)
         if spec and spec.get("supports_tools"):
@@ -1204,9 +1210,10 @@ class LLMChatClient:
         tools_ok = self._model_supports_tools(model)
         request_messages = self._messages_for_request()
 
-        # When model doesn't support tools, swap system prompt to avoid
-        # the model hallucinating tool call text
-        if not tools_ok and request_messages:
+        # When model doesn't support agentic tools (or Responses API provider),
+        # swap to simplified system prompt with no tool-calling instructions.
+        is_responses = self.state.provider == "openai_responses"
+        if (not tools_ok or is_responses) and request_messages:
             no_tools_prompt = self._system_prompt(tools_available=False)
             request_messages = list(request_messages)
             if request_messages[0].get("role") == "system":
@@ -1278,6 +1285,18 @@ class LLMChatClient:
                          code_theme=_theme.get("code_theme", "monokai"),
                          citation_color=_theme.get("command", "cyan"),
                          citation_style=self.state.citation_style)
+
+        # Display web sources for Responses API (native search has no tool callbacks)
+        if bundle.consulted or bundle.cited:
+            tc = get_theme(self.state.theme).get("command", "cyan")
+            sources = bundle.consulted or bundle.cited
+            self.console.print()
+            self.console.print(f"[{tc}]◆ Web sources consulted ({len(sources)}):[/{tc}]")
+            for i, (title, url) in enumerate(sources, 1):
+                label = (title or url or "")[:80]
+                self.console.print(f"  [{tc}][{i}][/{tc}] {label}")
+                if url and title:
+                    self.console.print(f"     [dim]{url}[/dim]")
 
         if self.last_reasoning:
             n = len(self.last_reasoning)
@@ -1511,6 +1530,14 @@ class LLMChatClient:
             self.state.model = provider_models[0]
 
         self.console.print(f"[green]Switched to {provider}.[/green] Model: {self.state.model}")
+
+        if provider == "openai_responses":
+            search_on = self.state.search_mode != "off" and self.state.tools_enabled
+            search_status = "enabled (native OpenAI web_search)" if search_on else "disabled"
+            self.console.print(
+                f"[dim]Responses API: no agentic pipeline, no Brave/S2. "
+                f"Native web search: {search_status}. Use /search off to disable.[/dim]"
+            )
 
         if provider == "kimi":
             thinking_status = "disabled (instant)" if self.state.reasoning_effort == "none" else "enabled"

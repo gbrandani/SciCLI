@@ -127,6 +127,19 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                 "gpt-5.2-pro": {"context": 400_000, "max_output": 128_000},
             },
         },
+        "openai_responses": {
+            # OpenAI Responses API — native web_search, no agentic tool loop.
+            # Uses the same API key as the openai provider.
+            "api_key_env": "API_KEY_OPENAI",
+            "api_key_env_alt": "OPENAI_API_KEY",
+            "compact_model": "gpt-5-nano",
+            "models": {
+                "gpt-5-mini": {"context": 400_000, "max_output": 128_000},
+                "gpt-5-nano": {"context": 400_000, "max_output": 128_000},
+                "gpt-5.2": {"context": 400_000, "max_output": 128_000},
+                "gpt-5.2-pro": {"context": 400_000, "max_output": 128_000},
+            },
+        },
         "sakura": {
             "base_url": "https://api.ai.sakura.ad.jp/v1",
             "api_key_env": "SAKURA_API_KEY",
