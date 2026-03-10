@@ -21,5 +21,6 @@ env/
 *.swp
 *~
 
-# other hidden stuff
+# other stuff
+CLAUDE.md
 .*
