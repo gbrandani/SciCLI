@@ -1,27 +1,50 @@
-# SciCLI — LLM Interface for Reproducible Scientific Workflows
+# SciCLI — LLM Interface with Agentic Literature Search
 
-A terminal-based multi-provider LLM client designed for **reproducible, transparent scientific workflows** that involve literature search and structured synthesis of information from external sources.
+A personal, experimental terminal-based LLM client built to explore how language models can use tools — in particular web and literature search — to answer scientific questions more accurately and transparently.
 
 ---
 
 ## What This Is
 
-SciCLI is **an interface for LLMs to engage with the scientific literature in a way that is transparent, reproducible, and extensible.**
+SciCLI started as a personal project to understand how well current LLMs can integrate external tools (web search, paper retrieval, citation graphs) into their reasoning, and how much that actually helps compared to a model's built-in knowledge or native search capabilities.
 
-The key design principles are:
+It is **not** a production system or a polished product. It is a working testbed with a full agentic pipeline that I actively use and evaluate. Feedback, issues, and contributions are welcome.
 
-- **Reproducibility**: every action — which papers were read, which tools were called, which citations were generated — is tracked with full metadata. Sessions can be saved and reloaded exactly as they were.
-- **Transparency**: the model's search strategy, tool calls, and source inventory are all visible. Citations in answers are backed by real Semantic Scholar BibTeX entries, not hallucinated.
-- **Dual control**: most actions can be initiated by **either the model or the user**. You can let the model search autonomously, or you can manually run `/scholar`, `/read`, `/cite`, and feed the results to the model yourself.
-- **Controlled tool use**: the set of tools available to the model is explicit and configurable. You know exactly what external services the model can reach.
-- **Domain extensibility**: new tools (databases, APIs, file formats) can be added as self-contained plugins without touching the core loop.
+The design has a few principles worth keeping:
 
-### Primary use cases
+- **Transparency**: the model's tool calls, search queries, and source inventory are all visible. Citations refer to sources the model actually accessed in the session.
+- **Reproducibility**: sessions can be saved and reloaded. Every paper read, query run, and citation generated is tracked with metadata.
+- **Dual control**: most actions can be run by the model autonomously or by the user manually — you can let the model search, or direct it yourself with `/scholar`, `/read`, `/cite`.
+- **Multi-provider**: easily switch between OpenAI, DeepSeek, Kimi, and Sakura to compare how different models use the same tools on the same question.
 
-- Asking research questions that require real literature search and citation
-- Systematic exploration of a topic across dozens of papers with a synthesised, cited answer
-- Building reproducible question-answering pipelines over the scientific literature
-- Comparing how different LLMs reason about the same evidence base
+### What it is good for
+
+- Asking research questions that benefit from real literature search and citation
+- Manually-guided literature exploration (run searches yourself, then ask the model to synthesise)
+- Experimenting with agentic LLM pipelines and evaluating their limitations
+- Comparing how different models reason over the same evidence base
+
+---
+
+## Benchmark
+
+To evaluate search quality, SciCLI includes a runner for [LitQA2](https://github.com/Future-House/LAB-Bench), a benchmark of 199 multiple-choice questions drawn from recent biomedical literature. Each question requires retrieving and reasoning over specific information from real papers — making it a practical test of whether a model's search and retrieval strategy actually works.
+
+The benchmark compares three search modes across providers:
+
+- **No search** — the model answers from memory alone
+- **Brave agentic search** — the model uses SciCLI's tool loop (Brave + Semantic Scholar)
+- **Native search** — OpenAI's built-in `web_search` tool via the Responses API
+
+![LitQA2 benchmark results](docs/benchmark_figure.png)
+
+Key findings (GPT-5-mini, 50-question subset):
+
+- **Native search: ~84% accuracy** — native search is highly optimized for academic access and outperforms the agentic pipeline by a wide margin
+- **Brave agentic search: ~58% accuracy** — the main bottleneck is paywall access (~70% of failures): Brave finds the relevant paper, but Semantic Scholar cannot retrieve the full text
+- **No search: ~26–38% accuracy** — close to random on questions that require specific literature lookup
+
+The gap between native and agentic search is largely an access problem, not a reasoning problem. Native search can retrieve content that Brave + S2 cannot. The benchmark script is in `benchmark/run_litqa2.py` and the figure is generated by `benchmark/analyze_results.py`.
 
 ---
 
@@ -81,7 +104,7 @@ python scicli.py
 
 ### Run from anywhere
 
-Data directories (`conversations/`, `uploads/`, `.llmcli_stats.json`) are always stored inside the `scicli/` repo directory regardless of where you invoke the script. This means you can call it from any working directory:
+Data directories (`conversations/`, `uploads/`, `.scicli_stats.json`) are always stored inside the `scicli/` repo directory regardless of where you invoke the script. This means you can call it from any working directory:
 
 ```bash
 # Direct path
