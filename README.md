@@ -36,7 +36,7 @@ The benchmark compares three search modes across providers:
 - **Brave agentic search** — the model uses SciCLI's tool loop (Brave + Semantic Scholar)
 - **Native search** — OpenAI's built-in `web_search` tool via the Responses API
 
-![LitQA2 benchmark results](docs/benchmark_figure.png)
+![LitQA2 benchmark results](docs/benchmark_figure_openai.png)
 
 Key findings (GPT-5-mini, 50-question subset):
 
