@@ -11,6 +11,7 @@ settings.json
 
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 .venv/
@@ -21,6 +22,13 @@ env/
 *.swp
 *~
 
-# other stuff
+# claude
 CLAUDE.md
-.*
+.claude/
+
+# git
+.git/
+
+# cli files
+.scicli_history
+.scicli_stats.json

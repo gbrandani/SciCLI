@@ -24,10 +24,10 @@ APP_NAME = "SciCLI"
 # via a symlink from ~/bin or from a different project directory).
 _APP_DIR = Path(__file__).resolve().parent
 
-HISTORY_FILE = _APP_DIR / ".llmcli_history"
+HISTORY_FILE = _APP_DIR / ".scicli_history"
 CONV_DIR     = _APP_DIR / "conversations"
 UPLOAD_DIR   = _APP_DIR / "uploads"
-STATS_FILE   = _APP_DIR / ".llmcli_stats.json"
+STATS_FILE   = _APP_DIR / ".scicli_stats.json"
 
 DEFAULT_CONTEXT_MESSAGES = 10  # sliding window length
 DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -268,7 +268,7 @@ class SessionState:
 
 @dataclass
 class AppStats:
-    """Persistent usage statistics saved to .llmcli_stats.json.
+    """Persistent usage statistics saved to .scicli_stats.json.
 
     counts stores monthly totals per service:
       {"brave": {"2026-03": 42}, "sakura": {"2026-03": 150}, ...}

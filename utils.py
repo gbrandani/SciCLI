@@ -145,7 +145,7 @@ def safe_write_json(path: Path, data: Any) -> None:
 def increment_stat(service: str) -> int:
     """Increment the monthly usage counter for a service in the stats file.
 
-    The stats file (.llmcli_stats.json) stores per-service monthly counts:
+    The stats file (.scicli_stats.json) stores per-service monthly counts:
       {"brave": {"2026-03": 42}, "openai": {"2026-03": 8}, ...}
 
     Thread-safety: not needed (single-user CLI).

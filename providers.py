@@ -191,7 +191,7 @@ SAKURA_MONTHLY_LIMIT = 3000
 class SakuraUsageTracker:
     """Tracks monthly Sakura API request count against the free-tier limit.
 
-    Reads/writes the 'sakura' key in the shared .llmcli_stats.json file so that
+    Reads/writes the 'sakura' key in the shared .scicli_stats.json file so that
     all provider and Brave usage is consolidated in one place.
     """
 
