@@ -386,6 +386,12 @@ class ReplyBundle:
     consulted: List[Tuple[str, str]]   # (title, url)
     source_details: Optional[List[RecordInfo]] = None
     tool_context_summary: Optional[str] = None
+    input_tokens: int = 0              # cumulative prompt tokens across all API calls
+    output_tokens: int = 0             # cumulative completion tokens across all API calls (includes reasoning)
+    reasoning_tokens: Optional[int] = None
+    # None  = model does not use chain-of-thought reasoning
+    # -1    = model reasoned but API does not report token count separately
+    # N>=0  = reasoning tokens (already included in output_tokens total)
 
 
 # ----------------------------

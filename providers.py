@@ -8,6 +8,7 @@ Agentic loop, records, and compaction logic live in separate modules.
 from __future__ import annotations
 
 import json
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -146,7 +147,9 @@ class OpenAIResponsesProvider(ProviderBase):
         consulted: List[Tuple[str, str]] = []
 
         try:
-            resp_d = resp.model_dump()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                resp_d = resp.model_dump()
         except Exception:
             resp_d = {}
 
@@ -173,10 +176,16 @@ class OpenAIResponsesProvider(ProviderBase):
                     seen.add(key)
                     out.append((title, url))
 
+        usage = getattr(resp, "usage", None)
+        in_tok  = getattr(usage, "input_tokens",  0) or 0 if usage else 0
+        out_tok = getattr(usage, "output_tokens", 0) or 0 if usage else 0
+
         return ReplyBundle(
             text=answer_text,
             cited=deduped_cited,
             consulted=deduped_consulted,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
         )
 
 

@@ -1044,7 +1044,11 @@ def fetch_url_as_markdown_or_pdf_text(url: str, state: SessionState, timeout: in
 
         body = r.text
 
-    soup = BeautifulSoup(body, "html.parser")
+    import warnings
+    from bs4 import XMLParsedAsHTMLWarning
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        soup = BeautifulSoup(body, "html.parser")
     title = ""
     if soup.title and soup.title.string:
         title = soup.title.string.strip()

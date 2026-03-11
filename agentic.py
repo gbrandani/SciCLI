@@ -341,6 +341,10 @@ def _route_needs_search(
             max_tokens=300,
             temperature=0,
         )
+        usage = (
+            getattr(resp.usage, "prompt_tokens", 0) or 0,
+            getattr(resp.usage, "completion_tokens", 0) or 0,
+        ) if resp.usage else (0, 0)
         text = (resp.choices[0].message.content or "").strip()
         needs_search = True  # default to search on parse failure
         for line in reversed(text.splitlines()):
@@ -349,9 +353,9 @@ def _route_needs_search(
                 verdict = line.replace("SEARCH:", "").strip()
                 needs_search = verdict.startswith("YES")
                 break
-        return needs_search, text
+        return needs_search, text, usage
     except Exception:
-        return True, ""  # default to search on error
+        return True, "", (0, 0)  # default to search on error
 
 
 # ----------------------------
@@ -426,11 +430,18 @@ def run_agentic_loop(
     if search_mode not in ("auto", "on", "off"):
         search_mode = "auto"
 
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_reasoning_tokens = 0   # known reasoning tokens (from completion_tokens_details)
+    had_reasoning_unknown = False  # model reasoned but API didn't report count
+
     # Pre-loop router call for "auto" mode
     if search_mode == "auto" and supports_tools:
-        needs_search, _router_reason = _route_needs_search(
+        needs_search, _router_reason, _router_usage = _route_needs_search(
             client, model, originating_question, on_status
         )
+        total_input_tokens  += _router_usage[0]
+        total_output_tokens += _router_usage[1]
         if needs_search:
             search_mode = "on"
             if on_status:
@@ -562,6 +573,15 @@ def run_agentic_loop(
                 kwargs["messages"] = loop_messages
 
         resp = client.chat.completions.create(**kwargs)
+        if resp.usage:
+            total_input_tokens  += getattr(resp.usage, "prompt_tokens",     0) or 0
+            total_output_tokens += getattr(resp.usage, "completion_tokens", 0) or 0
+            details = getattr(resp.usage, "completion_tokens_details", None)
+            rt = getattr(details, "reasoning_tokens", None) if details else None
+            if rt is not None:
+                total_reasoning_tokens += rt
+            elif getattr(resp.choices[0].message if resp.choices else None, "reasoning_content", None):
+                had_reasoning_unknown = True
         choice = resp.choices[0]
         finish_reason = choice.finish_reason
 
@@ -634,6 +654,15 @@ def run_agentic_loop(
                 retry_kwargs["messages"] = loop_messages
                 try:
                     retry_resp = client.chat.completions.create(**retry_kwargs)
+                    if retry_resp.usage:
+                        total_input_tokens  += getattr(retry_resp.usage, "prompt_tokens",     0) or 0
+                        total_output_tokens += getattr(retry_resp.usage, "completion_tokens", 0) or 0
+                        details = getattr(retry_resp.usage, "completion_tokens_details", None)
+                        rt = getattr(details, "reasoning_tokens", None) if details else None
+                        if rt is not None:
+                            total_reasoning_tokens += rt
+                        elif getattr(retry_resp.choices[0].message if retry_resp.choices else None, "reasoning_content", None):
+                            had_reasoning_unknown = True
                     retry_choice = retry_resp.choices[0]
                     content = retry_choice.message.content or ""
                     retry_rc = getattr(retry_choice.message, "reasoning_content", None)
@@ -653,12 +682,21 @@ def run_agentic_loop(
                 if not rec.cleared and rec.info.access_level == "snippet":
                     rec.cleared = True
             inventory = build_record_inventory(all_records)
+            if had_reasoning_unknown:
+                final_reasoning = -1
+            elif total_reasoning_tokens > 0:
+                final_reasoning = total_reasoning_tokens
+            else:
+                final_reasoning = None
             return ReplyBundle(
                 text=content,
                 cited=[],
                 consulted=dedup_pairs(all_consulted),
                 source_details=all_records,
                 tool_context_summary=inventory if inventory else None,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                reasoning_tokens=final_reasoning,
             )
 
         assistant_msg = choice.message

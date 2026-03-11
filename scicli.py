@@ -713,7 +713,8 @@ class LLMChatClient:
             {"role": "system", "content": self._system_prompt()},
         ]
         self.stats = self.load_stats()
-        self._session_counts: Dict[str, int] = {}  # in-memory session counters
+        self._session_counts: Dict[str, int] = {}         # in-memory session request counters
+        self._session_tokens: Dict[str, int] = {}         # in-memory session token counters
 
         self._providers: Dict[str, ProviderBase] = {}
         self.session = self._setup_prompt_toolkit()
@@ -1251,6 +1252,10 @@ class LLMChatClient:
             )
             prov = self.state.provider.lower()
             self._session_counts[prov] = self._session_counts.get(prov, 0) + 1
+            self._session_tokens["input"]     = self._session_tokens.get("input",     0) + bundle.input_tokens
+            self._session_tokens["output"]    = self._session_tokens.get("output",    0) + bundle.output_tokens
+            if bundle.reasoning_tokens and bundle.reasoning_tokens > 0:
+                self._session_tokens["reasoning"] = self._session_tokens.get("reasoning", 0) + bundle.reasoning_tokens
             if prov != "sakura":  # Sakura is tracked by SakuraUsageTracker.increment()
                 increment_stat(prov)
         except Exception as e:
@@ -1498,6 +1503,17 @@ class LLMChatClient:
                     f"{label}: [cyan]{session}[/cyan] this session, "
                     f"[cyan]{monthly}[/cyan] this month"
                 )
+
+        # Token usage (session only — not persisted across sessions)
+        in_tok  = self._session_tokens.get("input",  0)
+        out_tok = self._session_tokens.get("output", 0)
+        r_tok   = self._session_tokens.get("reasoning", 0)
+        if in_tok or out_tok:
+            r_str = f"  (reasoning: [cyan]{r_tok:,}[/cyan])" if r_tok else ""
+            lines.append(
+                f"Tokens this session: [cyan]{in_tok:,}[/cyan] in / [cyan]{out_tok:,}[/cyan] out{r_str}"
+            )
+
         return "\n".join(lines) if lines else "[dim](no usage recorded yet)[/dim]"
 
     def cmd_formats(self) -> None:
