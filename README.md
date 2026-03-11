@@ -41,8 +41,8 @@ The benchmark compares three search modes across providers:
 Key findings (GPT-5-mini, 50-question subset):
 
 - **Native search: ~84% accuracy** — native search is highly optimized for academic access and outperforms the agentic pipeline by a wide margin
-- **Brave agentic search: ~58% accuracy** — the main bottleneck is paywall access (~70% of failures): Brave finds the relevant paper, but Semantic Scholar cannot retrieve the full text
-- **No search: ~26–38% accuracy** — close to random on questions that require specific literature lookup
+- **Brave agentic search: ~59% accuracy** — the main bottleneck is paywall access (~70% of failures): Brave finds the relevant paper, but Semantic Scholar cannot retrieve the full text
+- **No search: ~38% accuracy** — close to random on questions that require specific literature lookup
 
 The gap between native and agentic search is largely an access problem.
 
