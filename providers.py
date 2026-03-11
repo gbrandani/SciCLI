@@ -180,12 +180,21 @@ class OpenAIResponsesProvider(ProviderBase):
         in_tok  = getattr(usage, "input_tokens",  0) or 0 if usage else 0
         out_tok = getattr(usage, "output_tokens", 0) or 0 if usage else 0
 
+        # Responses API: reasoning tokens are under usage.output_tokens_details.reasoning_tokens
+        r_tok: Optional[int] = None
+        if usage:
+            details = getattr(usage, "output_tokens_details", None)
+            rt = getattr(details, "reasoning_tokens", None) if details else None
+            if rt is not None:
+                r_tok = int(rt)
+
         return ReplyBundle(
             text=answer_text,
             cited=deduped_cited,
             consulted=deduped_consulted,
             input_tokens=in_tok,
             output_tokens=out_tok,
+            reasoning_tokens=r_tok,
         )
 
 
