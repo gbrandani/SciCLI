@@ -31,6 +31,26 @@ def _clean_dsml_artifacts(text: str) -> str:
     return text.strip()
 
 
+def _clean_together_artifacts(text: str) -> str:
+    """Remove Together AI gpt-oss model internal tool-call tokens from output.
+
+    gpt-oss-20b/120b sometimes leaks its internal tool-calling syntax into the
+    content field when tools are unavailable or when it generates phantom calls:
+      <|start|>assistant<|channel|>commentary to=functions.X <|constrain|>json<|message|>{...}<|call|>
+    These are NOT real tool executions — strip them before displaying.
+    """
+    # Remove full phantom tool-call blocks (greedy across newlines)
+    text = re.sub(
+        r"<\|start\|>assistant<\|channel\|>commentary to=functions\.\S+.*?<\|call\|>",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+    # Remove any remaining stray special tokens
+    text = re.sub(r"<\|[^|>]+\|>", "", text)
+    return text.strip()
+
+
 # ----------------------------
 # Force-answer & think prompts
 # ----------------------------
@@ -234,6 +254,7 @@ def run_research_pipeline(
     builtin_tool_handler=None,
     asst_msg_builder=None,
     token_param="max_tokens",
+    guidance_role: str = "system",
 ) -> ReplyBundle:
     """
     3-phase research pipeline:
@@ -297,6 +318,7 @@ def run_research_pipeline(
         asst_msg_builder=asst_msg_builder,
         token_param=token_param,
         think_draft=think_draft,
+        guidance_role=guidance_role,
     )
 
 
@@ -394,9 +416,14 @@ def run_agentic_loop(
     asst_msg_builder: Optional[Callable] = None,
     token_param: str = "max_tokens",
     think_draft: Optional[str] = None,
+    guidance_role: str = "system",
 ) -> ReplyBundle:
     """
-    Shared agentic tool loop for DeepSeek, Kimi, and OpenAI (non-web-search mode).
+    Shared agentic tool loop for DeepSeek, Kimi, OpenAI, and Together AI providers.
+
+    guidance_role: role used for mid-loop injected guidance messages ("system" or "user").
+    Some models (e.g. Qwen3.5 on Together AI) reject multiple system messages;
+    set guidance_role="user" for those models.
     """
     depth = getattr(state, "search_depth", "shallow")
     depth_cfg = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["shallow"])
@@ -421,7 +448,7 @@ def run_agentic_loop(
         if _pmsg:
             # Insert after the main system message (position 0) if present
             insert_pos = 1 if loop_messages and loop_messages[0].get("role") == "system" else 0
-            loop_messages.insert(insert_pos, {"role": "system", "content": _pmsg})
+            loop_messages.insert(insert_pos, {"role": guidance_role, "content": _pmsg})
 
     search_mode = getattr(state, 'search_mode', 'auto')
     domain_filter = getattr(state, 'domain_filter', 'web')
@@ -479,11 +506,11 @@ def run_agentic_loop(
                 " [Domain filter: ACADEMIC — academic sources are ranked higher in results;"
                 " non-academic sources may still appear as fallback.]"
             )
-        loop_messages.append({"role": "system", "content": loop_guidance})
+        loop_messages.append({"role": guidance_role, "content": loop_guidance})
 
     if search_mode == "off":
         loop_messages.append({
-            "role": "system",
+            "role": guidance_role,
             "content": (
                 "Web search is disabled for this session. Do NOT call search(). "
                 "Answer directly from your knowledge. "
@@ -500,7 +527,10 @@ def run_agentic_loop(
         if override_tools is not None:
             eff_tools = override_tools
         elif search_mode == "off":
-            eff_tools = [t for t in AGENTIC_TOOLS if t["function"]["name"] != "search"]
+            # No new discovery: disable search and read, but keep reread and
+            # get_paper_references so the model can revisit papers already in session.
+            _no_discovery = {"search", "read"}
+            eff_tools = [t for t in AGENTIC_TOOLS if t["function"]["name"] not in _no_discovery]
         else:
             eff_tools = AGENTIC_TOOLS
         kwargs["tools"] = eff_tools
@@ -543,7 +573,7 @@ def run_agentic_loop(
                     "for aspects you haven't found good sources on yet."
                 )
             if checkpoint_msg:
-                loop_messages.append({"role": "system", "content": checkpoint_msg})
+                loop_messages.append({"role": guidance_role, "content": checkpoint_msg})
 
         if iteration >= force_answer_at and supports_tools:
             if iteration == force_answer_at and not in_synthesis:
@@ -594,7 +624,16 @@ def run_agentic_loop(
                 f"content={len(ct)}ch reasoning={len(rc)}ch[/dim]"
             )
 
-        if finish_reason != "tool_calls" or not supports_tools or in_synthesis:
+        # Use actual tool_calls presence rather than finish_reason alone:
+        # some providers (e.g. Together AI) return finish_reason="length" even
+        # when valid tool_calls are present, so relying on finish_reason alone
+        # would cause the loop to exit early and discard the tool calls.
+        has_tool_calls = (
+            bool(getattr(choice.message, "tool_calls", None))
+            and supports_tools
+            and not in_synthesis
+        )
+        if not has_tool_calls:
             content = choice.message.content or ""
             reasoning = getattr(choice.message, "reasoning_content", None)
             # Surface model reasoning tokens (Qwen3 enable_thinking, gpt-oss-120b reasoning_content).
@@ -787,7 +826,7 @@ def run_agentic_loop(
                         for ri in citable
                     )
                     deferred_messages.append({
-                        "role": "system",
+                        "role": guidance_role,
                         "content": f"CITATION REMINDER: {key_hints}. In your final answer use Pandoc citation format [@ref_key] for each source you draw on.",
                     })
 

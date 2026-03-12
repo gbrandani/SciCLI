@@ -1,7 +1,7 @@
 """
 providers.py — LLM provider classes for Chat CLI.
 
-OpenAI (Chat Completions), DeepSeek, Kimi, and Sakura providers.
+OpenAI (Chat Completions), DeepSeek, Kimi, Sakura, and Together AI providers.
 Agentic loop, records, and compaction logic live in separate modules.
 """
 
@@ -15,10 +15,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
-from config import SessionState, ReplyBundle, STATS_FILE
+from config import SessionState, ReplyBundle, STATS_FILE, get_model_full_id
 from utils import extract_kimi_final, safe_read_json, safe_write_json
 from tools import AGENTIC_TOOLS
-from agentic import run_research_pipeline, _clean_dsml_artifacts
+from agentic import run_research_pipeline, _clean_dsml_artifacts, _clean_together_artifacts
 
 # Backward-compat re-exports (tests and chat_cli may import these)
 from agentic import (
@@ -448,4 +448,72 @@ class KimiProvider(ProviderBase):
             extra_create_kwargs=extra_create_kwargs,
             override_tools=kimi_tools,
             asst_msg_builder=_kimi_asst_msg_builder,
+        )
+
+
+# ----------------------------
+# Together AI (OpenAI-compatible Chat Completions)
+# ----------------------------
+
+class TogetherProvider(ProviderBase):
+    """Together AI via OpenAI-compatible Chat Completions API.
+
+    Models are stored by short display name in settings.json (e.g. 'GLM-5').
+    The provider resolves each short name to the full Together model ID
+    (e.g. 'zai-org/GLM-5') before making API calls.
+
+    For unknown models the user may pass the full 'org/model' string directly;
+    a warning is already shown by cmd_model in scicli.py.
+    """
+    name = "togetherai"
+    BASE_URL = "https://api.together.xyz/v1"
+
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key, base_url=self.BASE_URL)
+
+    def _resolve_model_id(self, model: str) -> str:
+        """Map short display name to Together AI full model ID.
+
+        Falls back to model as-is if:
+        - it already contains '/' (user typed full org/model)
+        - it has no full_id entry in settings (unknown model)
+        """
+        full_id = get_model_full_id("togetherai", model)
+        return full_id  # returns model unchanged if no full_id found
+
+    def send(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        state: SessionState,
+        max_output_tokens: Optional[int] = None,
+        use_tools: bool = True,
+        on_tool_start: Optional[Callable[[str, Dict], None]] = None,
+        on_tool_result: Optional[Callable] = None,
+        on_status: Optional[Callable[[str], None]] = None,
+        on_think_draft: Optional[Callable[[str], None]] = None,
+        on_reasoning_content: Optional[Callable[[str], None]] = None,
+    ) -> ReplyBundle:
+        full_model_id = self._resolve_model_id(model)
+
+        # Some Together AI models reject multiple system messages in the same
+        # conversation (e.g. Qwen3.5).  For those, inject loop guidance as
+        # role "user" instead of role "system".
+        _MULTI_SYSTEM_OK = {"openai/gpt-oss-20b", "openai/gpt-oss-120b", "zai-org/GLM-5"}
+        guidance_role = "system" if full_model_id in _MULTI_SYSTEM_OK else "user"
+
+        return run_research_pipeline(
+            client=self.client,
+            messages=messages,
+            model=full_model_id,
+            state=state,
+            max_output_tokens=max_output_tokens,
+            supports_tools=use_tools,
+            on_tool_start=on_tool_start,
+            on_tool_result=on_tool_result,
+            on_status=on_status,
+            on_think_draft=on_think_draft,
+            on_reasoning_content=on_reasoning_content,
+            post_process=_clean_together_artifacts,
+            guidance_role=guidance_role,
         )

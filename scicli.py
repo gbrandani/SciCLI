@@ -5,7 +5,7 @@
 scicli.py — SciCLI: Scientific Command-Line Interface for reproducible LLM research workflows.
 
 Features:
-- Multi-provider chat: OpenAI, DeepSeek, Kimi (Moonshot AI), Sakura Internet AI
+- Multi-provider chat: OpenAI, DeepSeek, Kimi (Moonshot AI), Sakura Internet AI, Together AI
 - Agentic tool use: DeepSeek and Kimi autonomously search papers and web
 - Web browsing: Brave Search API (/web) + /read to open and ingest pages
 - Literature search: Semantic Scholar (/scholar, /scholar_more, /sread, /sbib)
@@ -75,6 +75,7 @@ from config import (
     SourceInfo, SourceEntry, record_info_from_dict,
     load_settings, get_model_specs, models_by_provider,
     get_provider_config, get_api_key, get_compact_model, get_theme,
+    find_provider_for_model, create_default_settings_if_absent,
 )
 from utils import (
     format_model_list, now_ts, safe_read_json, safe_write_json, increment_stat,
@@ -91,7 +92,7 @@ from utils import (
 from providers import (
     ProviderBase, OpenAIProvider, OpenAIChatProvider,
     DeepSeekProvider, KimiProvider, SakuraProvider, SakuraUsageTracker,
-    OpenAIResponsesProvider,
+    OpenAIResponsesProvider, TogetherProvider,
     SAKURA_MONTHLY_LIMIT, SAKURA_USAGE_FILE,
 )
 from tools import _tool_search_papers, _tool_get_paper_references, execute_tool
@@ -129,7 +130,7 @@ COMMAND_REGISTRY: Dict[str, CommandInfo] = {
         short_help="Switch LLM provider.", example="/provider deepseek",
         arg_spec="<name>",
         detailed_help=(
-            "Switch to a different LLM provider. Available: openai, deepseek, kimi, sakura. "
+            "Switch to a different LLM provider. Available: openai, deepseek, kimi, sakura, togetherai. "
             "Auto-switches model if current one doesn't belong to the new provider."
         ),
     ),
@@ -199,7 +200,8 @@ COMMAND_REGISTRY: Dict[str, CommandInfo] = {
             "         search is needed, based on the nature of the question (time-sensitive\n"
             "         vs. established knowledge). Avoids unnecessary searches for basic facts.\n"
             "  on   — always search, regardless of question type\n"
-            "  off  — never search; model answers from training knowledge only\n\n"
+            "  off  — never search; model answers from training knowledge only.\n"
+            "         All agentic tools are disabled (no search, read, or reread).\n\n"
             "Use /domain to control Brave result filtering (web vs. academic)."
         ),
     ),
@@ -213,18 +215,6 @@ COMMAND_REGISTRY: Dict[str, CommandInfo] = {
             "  academic — academic domains boosted via Goggle re-ranking (soft preference;\n"
             "             falls back to 'web' if Goggles are unsupported on your API tier)\n\n"
             "This setting is independent of /search (which controls whether to search at all)."
-        ),
-    ),
-    "/tools": CommandInfo(
-        handler="cmd_tools", group="settings",
-        short_help="Toggle agentic tool use.", example="/tools off",
-        arg_spec="on|off",
-        detailed_help=(
-            "Enable or disable agentic tool calling. When on (default), the model "
-            "can autonomously call search_papers, read_paper, web_search, read_webpage, "
-            "and get_paper_references during the agentic loop. When off, the model "
-            "answers from its training knowledge and any manually ingested sources only. "
-            "The system prompt is adjusted accordingly to avoid hallucinated tool-call text."
         ),
     ),
     "/trunclimit": CommandInfo(
@@ -836,6 +826,8 @@ class LLMChatClient:
                 self._providers[prov] = SakuraProvider(api_key=key)
             elif prov == "openai_responses":
                 self._providers[prov] = OpenAIResponsesProvider(api_key=key)
+            elif prov == "togetherai":
+                self._providers[prov] = TogetherProvider(api_key=key)
             else:
                 raise ValueError(f"Unknown provider: {prov}")
 
@@ -945,12 +937,15 @@ class LLMChatClient:
         return 32_000, 4_000
 
     def _model_supports_tools(self, model: str) -> bool:
-        """Check if current model supports tool calling (agentic or native web_search)."""
-        if not self.state.tools_enabled:
+        """Check if current model supports tool calling (agentic or native web_search).
+
+        /search off disables all tools — search, read, reread, get_paper_references
+        are all discovery/retrieval tools; turning off search turns off the lot.
+        """
+        if self.state.search_mode == "off":
             return False
         if self.state.provider == "openai_responses":
-            # "tools" here means native web_search — enabled unless search is off
-            return self.state.search_mode != "off"
+            return True  # native web_search; already gated by search_mode above
         specs = get_model_specs()
         spec = specs.get(model, None)
         if spec and spec.get("supports_tools"):
@@ -1203,7 +1198,12 @@ class LLMChatClient:
         self.messages.append({"role": "user", "content": text})
         self.maybe_compact()
 
-        provider = self._get_provider()
+        try:
+            provider = self._get_provider()
+        except (RuntimeError, ValueError) as e:
+            self.console.print(f"[red]Provider error:[/red] {e}")
+            self.messages.pop()  # remove the user message we just appended
+            return
         model = self.state.model
         _, max_out = self._model_limits(model)
         max_out = min(max_out, 16_000)
@@ -1291,8 +1291,9 @@ class LLMChatClient:
                          citation_color=_theme.get("command", "cyan"),
                          citation_style=self.state.citation_style)
 
-        # Display web sources for Responses API (native search has no tool callbacks)
-        if bundle.consulted or bundle.cited:
+        # Display web sources for Responses API only (native search has no tool callbacks;
+        # other providers already show consulted sources via tool call output)
+        if self.state.provider == "openai_responses" and (bundle.consulted or bundle.cited):
             tc = get_theme(self.state.theme).get("command", "cyan")
             sources = bundle.consulted or bundle.cited
             self.console.print()
@@ -1539,16 +1540,16 @@ class LLMChatClient:
             return
         self.state.provider = provider
 
-        # Auto-switch model if current one doesn't belong to new provider
+        # Always switch to the new provider's first (default) model
         grouped = models_by_provider()
         provider_models = grouped.get(provider, [])
-        if provider_models and self.state.model not in provider_models:
+        if provider_models:
             self.state.model = provider_models[0]
 
         self.console.print(f"[green]Switched to {provider}.[/green] Model: {self.state.model}")
 
         if provider == "openai_responses":
-            search_on = self.state.search_mode != "off" and self.state.tools_enabled
+            search_on = self.state.search_mode != "off"
             search_status = "enabled (native OpenAI web_search)" if search_on else "disabled"
             self.console.print(
                 f"[dim]Responses API: no agentic pipeline, no Brave/S2. "
@@ -1569,16 +1570,21 @@ class LLMChatClient:
 
     def cmd_model(self, model: str) -> None:
         model = model.strip()
-        specs = get_model_specs()
-        if model not in specs:
+        owner = find_provider_for_model(model, self.state.provider)
+        if not owner:
+            # Unknown model — warn and let the current provider try it as-is.
+            # For Together AI, users may also pass the full 'org/model' string.
             grouped = models_by_provider()
             prov = self.state.provider
             suggestions = grouped.get(prov, [])
             self.console.print(
                 f"[yellow]Unknown model '{model}'.[/yellow] "
                 f"Known for '{prov}': {format_model_list(suggestions)}. "
-                "Will try it anyway."
+                "Will try it anyway. To add it permanently, edit settings.json."
             )
+        elif owner != self.state.provider:
+            self.state.provider = owner
+            self.console.print(f"[dim]Auto-switched provider to {owner}.[/dim]")
         self.state.model = model
         self.console.print(f"[green]Model: {model}[/green]")
 
@@ -1764,16 +1770,6 @@ class LLMChatClient:
         else:
             self.console.print("[red]Usage:[/red] /domain web|academic")
 
-    def cmd_tools(self, arg: str) -> None:
-        a = (arg or "").strip().lower()
-        if a in ("on", "1", "true", "yes"):
-            self.state.tools_enabled = True
-            self.console.print("[green]Tools: ON[/green]")
-        elif a in ("off", "0", "false", "no"):
-            self.state.tools_enabled = False
-            self.console.print("[yellow]Tools: OFF[/yellow]")
-        else:
-            self.console.print("[red]Usage:[/red] /tools on|off")
 
     def cmd_trunclimit(self, arg: str) -> None:
         val = (arg or "").strip().lower()
@@ -2532,7 +2528,8 @@ class LLMChatClient:
                 _print_pinned(pr)
 
         # Group 2: Session sources (viewed during research, not in current context)
-        session_src = [e for e in registry if not e.cleared]
+        # Snippets are excluded — they are managed via /snippets
+        session_src = [e for e in registry if not e.cleared and e.content_type != "snippet"]
         if session_src:
             self.console.print(
                 f"\n[{acc}]Session sources[/{acc}] [dim](viewed during research — not in current context)[/dim]"
@@ -2540,8 +2537,8 @@ class LLMChatClient:
             for e in session_src:
                 _print_record(e)
 
-        # Group 3: Cleared (explicitly removed by user)
-        cleared_src = [e for e in registry if e.cleared]
+        # Group 3: Cleared (explicitly removed by user); snippets excluded
+        cleared_src = [e for e in registry if e.cleared and e.content_type != "snippet"]
         if cleared_src:
             self.console.print(f"\n[{acc}]Cleared:[/{acc}]")
             for e in cleared_src:
@@ -2987,10 +2984,9 @@ class LLMChatClient:
             except Exception:
                 continue
 
-        # If still over 70% of context, summarize older conversation
-        after_chars_mid = sum(len(m.get("content", "")) for m in self.messages)
-        ctx_chars = ctx_limit * 4
-        if after_chars_mid > int(ctx_chars * 0.70) and len(self.messages) > 8:
+        # Summarize conversation — for manual /compact always run this;
+        # the 70% threshold only applies to auto-compaction (maybe_compact).
+        if len(self.messages) > 4:
             # Summarize all messages except the last 6
             keep_count = 6
             to_summarize = self.messages[:-keep_count]
@@ -3830,7 +3826,14 @@ class LLMChatClient:
 
 
 def main() -> None:
+    created = create_default_settings_if_absent()
     client = LLMChatClient()
+    if created:
+        from config import _APP_DIR
+        client.console.print(
+            f"[dim]Created default settings.json in {_APP_DIR} — "
+            "edit it to add API keys and customise defaults.[/dim]"
+        )
     client.run()
 
 

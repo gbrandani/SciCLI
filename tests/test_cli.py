@@ -322,7 +322,6 @@ assert SourceInfo is RecordInfo
 # Verify SessionState has new fields
 s = SessionState()
 assert s.citation_style == 'numbered'
-assert s.tools_enabled == True
 assert s.search_queries_history == []
 assert s.agentic_tool_max_chars == 80_000
 print('ALL_TOOLS_OK')

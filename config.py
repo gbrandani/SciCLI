@@ -1,7 +1,8 @@
 """
 config.py — Settings, constants, and data structures for SciCLI.
 
-Loads configuration from ~/.config/scicli/settings.json (fallback: ~/.config/chat_cli/settings.json for backward compat, then ./settings.json, then defaults).
+Loads configuration from settings.json in the same directory as this file (i.e., the scicli repo directory).
+All runtime data files (history, stats, conversations, uploads) are also anchored to that directory.
 """
 
 from __future__ import annotations
@@ -167,6 +168,43 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                 "kimi-k2.5": {"context": 256_000, "max_output": 16_000, "supports_tools": True},
             },
         },
+        "togetherai": {
+            # Together AI OpenAI-compatible endpoint.
+            # Models are stored by short display name; "full_id" is the actual Together model ID.
+            "base_url": "https://api.together.xyz/v1",
+            "api_key_env": "TOGETHER_API_KEY",
+            "compact_model": "gpt-oss-20b",
+            "models": {
+                "gpt-oss-20b": {
+                    "full_id": "openai/gpt-oss-20b",
+                    "context": 128_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "gpt-oss-120b": {
+                    "full_id": "openai/gpt-oss-120b",
+                    "context": 128_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "DeepSeek-V3.1": {
+                    "full_id": "deepseek-ai/DeepSeek-V3.1",
+                    "context": 128_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "GLM-5": {
+                    "full_id": "zai-org/GLM-5",
+                    "context": 202_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "Qwen3.5-397B-A17B": {
+                    "full_id": "Qwen/Qwen3.5-397B-A17B",
+                    "context": 262_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "MiniMax-M2.5": {
+                    "full_id": "MiniMaxAI/MiniMax-M2.5",
+                    "context": 200_000, "max_output": 16_000, "supports_tools": True,
+                },
+                "kimi-k2.5": {
+                    "full_id": "moonshotai/kimi-k2.5",
+                    "context": 256_000, "max_output": 16_000, "supports_tools": True,
+                },
+            },
+        },
     },
     "defaults": {
         "provider": "sakura",
@@ -227,10 +265,9 @@ class SessionState:
 
     # Citation display
     citation_style: str = "numbered"  # "numbered" or "authoryear"
-    tools_enabled: bool = True
 
     # Search behaviour
-    search_mode: str = "auto"   # "auto" (router call) | "on" (always) | "off" (never)
+    search_mode: str = "off"    # "auto" (router call) | "on" (always) | "off" (never)
     domain_filter: str = "web"  # "web" | "academic" (Brave Goggle re-ranking)
 
     # Search query history (for TF-IDF ranking)
@@ -435,9 +472,7 @@ def load_settings(force_reload: bool = False) -> Dict[str, Any]:
             return cached_settings
 
     candidates = [
-        Path.home() / ".config" / "scicli" / "settings.json",
-        Path.home() / ".config" / "chat_cli" / "settings.json",  # backward compat
-        Path("settings.json"),
+        _APP_DIR / "settings.json",
     ]
 
     settings = dict(DEFAULT_SETTINGS)
@@ -502,6 +537,50 @@ def get_compact_model(provider: str) -> str:
     return cfg.get("compact_model", "gpt-5-nano")
 
 
+def find_provider_for_model(model_name: str, current_provider: str = "") -> str:
+    """Return the provider name that owns model_name.
+
+    Prefers current_provider if the model exists there (avoids unnecessary switches).
+    Returns "" if not found in any known provider.
+    """
+    grouped = models_by_provider()
+    if current_provider and model_name in grouped.get(current_provider, []):
+        return current_provider
+    for prov, models in grouped.items():
+        if model_name in models:
+            return prov
+    return ""
+
+
+def get_model_full_id(provider: str, model_name: str) -> str:
+    """Return the full API model ID for a Together AI model (or model_name itself for others).
+
+    For providers that store a 'full_id' in their model spec (e.g. togetherai),
+    returns that value; otherwise returns model_name unchanged.
+    """
+    cfg = get_provider_config(provider)
+    spec = cfg.get("models", {}).get(model_name, {})
+    return spec.get("full_id", model_name)
+
+
+def create_default_settings_if_absent() -> bool:
+    """Write settings.json with DEFAULT_SETTINGS if it doesn't exist.
+
+    Returns True if the file was created, False if it already existed.
+    The created file can be customised by the user to add API keys, change defaults,
+    add new models, etc.  The CLI deep-merges the file over DEFAULT_SETTINGS on every
+    start, so only the keys you want to override need to be present.
+    """
+    path = _APP_DIR / "settings.json"
+    if path.exists():
+        return False
+    try:
+        path.write_text(json.dumps(DEFAULT_SETTINGS, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return True
+
+
 _THEME_HARD_DEFAULTS: Dict[str, str] = {
     "command": "cyan",
     "success": "green",
@@ -527,9 +606,8 @@ def get_theme(theme_name: Optional[str] = None) -> Dict[str, str]:
 
     Resolution order:
       1. Hard-coded defaults (fallback)
-      2. themes/{theme_name}.theme.json  (built-in or user-placed)
-      3. ~/.config/scicli/themes/{theme_name}.theme.json  (user override)
-      4. settings.json ui.colors  (per-key overrides)
+      2. themes/{theme_name}.theme.json  (built-in or user-placed in repo themes/)
+      3. settings.json ui.colors  (per-key overrides)
     """
     settings = load_settings()
     if theme_name is None:
@@ -540,11 +618,9 @@ def get_theme(theme_name: Optional[str] = None) -> Dict[str, str]:
 
     result = dict(_THEME_HARD_DEFAULTS)
 
-    # Load theme file (local themes/ dir, then user config dir)
+    # Load theme file from repo themes/ dir
     candidates = [
         _THEMES_DIR / f"{theme_name}.theme.json",
-        Path.home() / ".config" / "scicli" / "themes" / f"{theme_name}.theme.json",
-        Path.home() / ".config" / "chat_cli" / "themes" / f"{theme_name}.theme.json",  # backward compat
     ]
     for candidate in candidates:
         if candidate.exists():

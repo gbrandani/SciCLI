@@ -147,8 +147,14 @@ def _build_verified_references(
     # Build canonical references section with a special delimiter that render_assistant
     # will detect and render with color (bypassing Markdown).
     ref_lines = ["\n\n\x00REFS\x00"]
-    # Order: by display label
-    sorted_keys = sorted(display_labels.keys(), key=lambda k: display_labels[k])
+    # Order: by display label (numeric sort for numbered style, lexicographic otherwise)
+    def _label_sort_key(k):
+        lbl = display_labels[k]
+        try:
+            return (0, int(lbl), "")
+        except ValueError:
+            return (1, 0, lbl)
+    sorted_keys = sorted(display_labels.keys(), key=_label_sort_key)
     for k in sorted_keys:
         s = key_map.get(k)
         if not s:
